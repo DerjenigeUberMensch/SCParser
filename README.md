@@ -3,6 +3,9 @@ A revised version of [ConfigParser](https://github.com/DerjenigeUberMensch/Confi
 
 ## Example
 ```C
+#include <stdio.h>
+#include <string.h>
+
 #include "parser.h"
 
 int
@@ -12,7 +15,7 @@ main()
     int var_int = 10;
     const int VAR_NUM_SHOWCASE = 1;
 
-    SCParser *parser = SCParserCreate(VAR_NUM_SHOWCASE);
+    SCParser *parser = SCPParserCreate(VAR_NUM_SHOWCASE);
     /* Failed to aloc memory for parser */
     if(!parser)
     {     return 1;
@@ -36,7 +39,7 @@ main()
     }
 
     /* write data to file */
-    const char *const FILE_NAME = "file_name"
+    const char *const FILE_NAME = "file_name";
     /* This should only fail if you input bad data/directory doesn't exist.
      * Overrites any previous data by the way, beware.
      */
@@ -87,4 +90,5 @@ main()
     SCParserDestroy(parser);
     return 0;
 }
+
 ```
