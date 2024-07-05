@@ -26,6 +26,7 @@ struct
 _SP_PARSER_ITEM
 {
     char *name;
+    void *data;
     uint32_t name_len;
     uint8_t allocated;
     uint8_t type;
@@ -108,15 +109,23 @@ SCParserSearch(
     return NULL;
 }
 
-/* TODO */
 SCItem *
 SCParserSearchSlow(
         SCParser *parser,
         const char *const NAME
         )
 {
-    if(!parser)
+    if(!parser || !NAME)
     {   return NULL;
+    }
+    uint32_t i;
+    SCItem *item;
+    for(i = 0; i < parser->index; ++i)
+    {
+        item = parser->items + i;
+        if(item->name == NAME)
+        {   return item;
+        }
     }
     return NULL;
 }
@@ -301,6 +310,25 @@ SCParserNewVar(
     SCItem *items = parser->items;
     SCItem *item = parser->items + parser->index;
 
+    if(_optional_type == SCTypeSTRING)
+    {
+        item->size = sizeof(char *);
+        item->type = SCTypeSTRING;
+    }
+    else if(__SC_GET_FORMAT_FROM_TYPE(_optional_type))
+    {   
+        item->size = __SC_GET_SIZE_FROM_TYPE(_optional_type);
+        item->type = _optional_type;
+    }
+    else if(size)
+    {
+        item->size = size;
+        item->type = SCTypeNoType;
+    }
+    else
+    {   return FAILURE;
+    }
+
     if(READONLY_SECTION)
     {
         item->name = VAR_NAME;
@@ -316,25 +344,8 @@ SCParserNewVar(
         memcpy(item->name, VAR_NAME, VAR_NAME_FULL_LENGTH);
     }
     item->name_len = VAR_NAME_FULL_LENGTH;
+    item->data = malloc(item->size);
 
-    if(_optional_type == SCTypeSTRING)
-    {
-        item->size = sizeof(char *);
-        item->type = _optional_type;
-    }
-    else if(__SC_GET_FORMAT_FROM_TYPE(_optional_type))
-    {   
-        item->size = __SC_GET_SIZE_FROM_TYPE(_optional_type);
-        item->type = _optional_type;
-    }
-    else if(size)
-    {
-        item->size = size;
-        item->type = SCTypeNoType;
-    }
-    else
-    {   return FAILURE;
-    }
     /* update index */
     ++parser->index;
 
@@ -400,11 +411,32 @@ int
 SCParserSaveVar(
         SCParser *parser,
         const char *const VAR_NAME,
-        void *data,
-        const size_t bytescopy,
-        const enum SCType _optional_type
+        void *data
         )
 {
+    const int FAILURE = 1;
+    const int SUCCESS = 0;
+    if(!parser || !VAR_NAME)
+    {   return FAILURE;
+    }
+
+
+    SCItem *item = SCParserSearch(parser, VAR_NAME);
+    if(!item)
+    {   item = SCParserSearchSlow(parser, VAR_NAME);
+    }
+    if(!item)
+    {   return FAILURE;
+    }
+
+    if(!item->data)
+    {   item->data = malloc(item->size);
+    }
+    if(!item->data)
+    {   return FAILURE;
+    }
+    memcpy(item->data, data, item->size);
+    return SUCCESS;
 }
 
 

@@ -130,16 +130,16 @@ SCParserDelVar(
         const char *const VAR_NAME
         );
 /*
- * RETURN: 0 if VAR_NAME exists.
- * RETURN: 1 if VAR_NAME doest exist.
+ * NOTE: STRINGS are only saved by pointer reference, undefined behaviour may occur if freed.
+ *
+ * RETURN: 0 on Success.
+ * RETURN: 1 on Failure.
  */
 int
 SCParserSaveVar(
         SCParser *parser,
         const char *const VAR_NAME,
-        void *data,
-        const size_t bytescopy,
-        const enum SCType _optional_type
+        void *data
         );
 
 
