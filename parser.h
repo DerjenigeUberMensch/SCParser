@@ -16,6 +16,8 @@ enum SCType
     SCTypeSHORT,
     SCTypeUINT,
     SCTypeINT,
+    SCTypeFLOAT,
+    SCTypeDOUBLE,
     SCTypeLONG,
     SCTypeULONG,
     SCTypeSTRING,
@@ -73,6 +75,16 @@ SCParserLoad(
         const enum SCType _optional_type
         );
 
+/*
+ * RETURN: 0 on Success.
+ * RETURN: 1 on Failure.
+ */
+int
+SCParserWrite(
+        SCParser *parser,
+        const char *const FILE_NAME
+        );
+
 /* 
  *
  * NOTE: No checks are made for unresonable BASE_VAR_COUNT, this is purely a constant optimization.
@@ -82,7 +94,6 @@ SCParserLoad(
  */
 SCParser *
 SCPParserCreate(
-        const char *const FILE_NAME,
         const uint32_t BASE_VAR_COUNT
         );
 

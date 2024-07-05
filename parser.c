@@ -15,7 +15,6 @@ KHASH_MAP_INIT_STR(__STR__TABLE__, uint32_t)
 struct 
 _SP_PARSER_STRUT
 {
-    FILE *fr;
     SCItem *items;
     uint32_t item_len;
     uint32_t index;
@@ -150,6 +149,10 @@ __SC_GET_FORMAT_FROM_TYPE(const enum SCType t)
             return "%d";
         case SCTypeUINT:
             return "%u";
+        case SCTypeFLOAT:
+            return "%f";
+        case SCTypeDOUBLE:
+            return "%lf";
         case SCTypeLONG:
             return "%ld";
         case SCTypeULONG:
@@ -158,6 +161,23 @@ __SC_GET_FORMAT_FROM_TYPE(const enum SCType t)
             return "%s";
     }
     return NULL;
+}
+
+static const char *const 
+__SC_GET_FORMAT_FROM_SIZE(const size_t size)
+{
+    switch(size)
+    {
+        case sizeof(int8_t):
+            return "%c";
+        case sizeof(int16_t):
+            return "%d";
+        case sizeof(int32_t):
+            return "%f";
+        case sizeof(int64_t):
+            return "%ld";
+    }
+    return "%c";
 }
 
 static const unsigned int
@@ -179,6 +199,10 @@ __SC_GET_SIZE_FROM_TYPE(const enum SCType t)
             return sizeof(int32_t);
         case SCTypeUINT:
             return sizeof(uint32_t);
+        case SCTypeFLOAT:
+            return sizeof(float);
+        case SCTypeDOUBLE:
+            return sizeof(double);
         case SCTypeLONG:
             return sizeof(int64_t);
         case SCTypeULONG:
@@ -288,6 +312,7 @@ SCParserLoad(
     }
     return FAILURE;
 NOTYPE:
+    /* TODO fix this later, dont use it though, prob when I use it again */
     /* check if negative */
     negative = item->typename[0] == '-';
     /* if its negative skip the negative sign duh */
@@ -300,10 +325,10 @@ NOTYPE:
     }
     memset(data, 0, sizeof(uint8_t) * DATA_SIZE);
     if(negative)
-    {   check = sscanf(item->typename, "%ld", (uint64_t *)&data);
+    {   check = sscanf(item->typename, "%ld", *(int64_t *)&data);
     }
     else
-    {   check = sscanf(item->typename, "%lu", (uint64_t *)&data);
+    {   check = sscanf(item->typename, "%lu", *(uint64_t *)&data);
     }
     if(check == SSCANF_CHECKSUM)
     {
@@ -313,33 +338,118 @@ NOTYPE:
     return FAILURE;
 }
 
+
+int
+SCParserWrite(
+        SCParser *parser,
+        const char *const FILE_NAME
+        )
+{
+    const int SUCCESS = 0;
+    const int FAILURE = 1;
+    if(!parser)
+    {   return FAILURE;
+    }
+
+    FILE *fw = fopen(FILE_NAME, "w");
+
+    if(!fw)
+    {   return FAILURE;
+    }
+
+    SCItem *item;
+    uint32_t i;
+
+    for(i = 0; i < parser->index; ++i)
+    {
+        item = parser->items + i;
+        if(item->data && item->name)
+        {   
+            const char *const format = __SC_GET_FORMAT_FROM_TYPE(item->type);
+            fprintf(fw, "%s=", item->name);
+            if(format)
+            {   
+                switch(item->type)
+                {
+                    case SCTypeCHAR:
+                        fprintf(fw, format, *(int8_t *)item->data);
+                        break;
+                    case SCTypeUCHAR:
+                        fprintf(fw, format, *(uint8_t *)item->data);
+                        break;
+                    case SCTypeSHORT:
+                        fprintf(fw, format, *(int16_t *)item->data);
+                        break;
+                    case SCTypeUSHORT:
+                        fprintf(fw, format, *(uint16_t *)item->data);
+                        break;
+                    case SCTypeINT:
+                        fprintf(fw, format, *(int32_t *)item->data);
+                        break;
+                    case SCTypeUINT:
+                        fprintf(fw, format, *(uint32_t *)item->data);
+                        break;
+                    case SCTypeFLOAT:
+                        fprintf(fw, format, *(float *)item->data);
+                        break;
+                    case SCTypeDOUBLE:
+                        fprintf(fw, format, *(double *)item->data);
+                        break;
+                    case SCTypeLONG:
+                        fprintf(fw, format, *(int64_t *)item->data);
+                        break;
+                    case SCTypeULONG:
+                        fprintf(fw, format, *(uint64_t *)item->data);
+                        break;
+                    case SCTypeSTRING:
+                        fprintf(fw, format, (char *)item->data);
+                        break;
+                }
+            }
+            else
+            {   
+                switch(item->size)
+                {
+                    case sizeof(int8_t):
+                        fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(item->size), *(char *)item->data);
+                        break;
+                    case sizeof(int16_t):
+                        fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(item->size), *(int16_t *)item->data);
+                        break;
+                    case sizeof(int32_t):
+                        fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(item->size), *(float *)item->data);
+                        break;
+                    case sizeof(int64_t):
+                        fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(item->size), *(int64_t *)item->data);
+                        break;
+                }
+            }
+            fprintf(fw, "\n");
+        }
+    }
+    fclose(fw);
+    return SUCCESS;
+}
+
+
 SCParser * 
 SCPParserCreate(
-        const char *const FILE_NAME,
         const uint32_t BASE_VAR_COUNT
         )
 {
     SCParser *p = malloc(sizeof(SCParser));
     if(p)
     {
-        p->fr = fopen(FILE_NAME, "r");
-        if(!p->fr)
-        {   
-            free(p);
-            return NULL;
-        }
         p->strtable = kh_init(__STR__TABLE__);
 
         if(!p->strtable)
         {   
-            fclose(p->fr);
             free(p);
             return NULL;
         }
         p->items = malloc(BASE_VAR_COUNT * sizeof(SCItem));
         if(!p->items)
         {
-            fclose(p->fr);
             kh_destroy(__STR__TABLE__, p->strtable);
             free(p);
             return NULL;
@@ -363,7 +473,12 @@ SCParserDestroy(
         if(item->allocated)
         {   free(item->name);
         }
+        if(item->typename)
+        {   free(item->typename);
+        }
+        free(item->data);
     }
+    kh_destroy(__STR__TABLE__, parser->strtable);
     free(parser->items);
     free(parser);
 }
@@ -437,6 +552,7 @@ SCParserReadFile(
     }
 
     fclose(fr);
+    return SUCCESS;
 }
 
 int
@@ -459,7 +575,7 @@ SCParserNewVar(
     }
 
     /* increase array size if too small */
-    if(parser->index > parser->item_len)
+    if(parser->index >= parser->item_len)
     {
         const float INCREASE_FACTOR = 1.5f;
         const uint32_t newlen = parser->item_len * INCREASE_FACTOR;
@@ -515,11 +631,7 @@ SCParserNewVar(
     item->typename = NULL;
     item->type_len = 0;
 
-    /* update index */
-    ++parser->index;
-
     /* add to table */
-
     int err = 3;
     khint_t k = kh_put(__STR__TABLE__, parser->strtable, item->name, &err);
     enum
