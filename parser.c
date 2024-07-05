@@ -10,7 +10,7 @@
 #include "khash.h"
 
 /* hashing */
-KHASH_MAP_INIT_STR(__STR__TABLE__, SCItem *)
+KHASH_MAP_INIT_STR(__STR__TABLE__, uint32_t)
 
 struct 
 _SP_PARSER_STRUT
@@ -26,14 +26,110 @@ struct
 _SP_PARSER_ITEM
 {
     char *name;
+    char *typename;
     void *data;
     uint32_t name_len;
+    uint32_t type_len;
     uint8_t allocated;
     uint8_t type;
     uint16_t size;
 };
 
+static char *
+__REMOVE_WHITE_SPACE(char *str, int str_len)
+{
+    char *ret = NULL;
+    int reti;
+    int i;
+    const int len = str_len;
+    int size = len + sizeof(char);
+    ret = malloc(size);
+    if(!ret)
+    {   return NULL;
+    }
+    reti = 0;
+    for(i = 0; i < len; ++i)
+    {   
+        if(str[i] != ' ')
+        {   
+            ret[reti] = str[i];
+            ++reti;
+        }
+    }
+    if(reti < size)
+    {   
+        size = reti + sizeof(char);
+        void *tmp = realloc(ret, size);
+        if(!tmp)
+        {   
+            free(ret);
+            return NULL;
+        }
+        ret = tmp;
+    }
+    ret[size - 1] = '\0';
+    return ret;
+}
 
+/* Allocated mememory must be freed by caller.
+ * Can return NULL
+ */
+static char *
+__SC_PARSE_NAME(char *buff)
+{
+    const char *delimeter = "=";
+    char *token = NULL;
+    char *ret = NULL;
+    const int maxlen = 1024;
+    
+    token = strtok(buff, delimeter);
+    if(token)
+    {   ret = __REMOVE_WHITE_SPACE(token, strnlen(token, maxlen));
+    }
+    return ret;
+}
+
+static char *
+__SC_PARSE_VALUE_STR(char *buff)
+{
+    const char *delimeter = "=";
+    char *token = NULL;
+    char *ret = NULL;
+    const int maxlen = 1024;
+    
+    token = strtok(buff, delimeter);
+    if(token)
+    {   ret = __REMOVE_WHITE_SPACE(token, strnlen(token, maxlen));
+    }
+    return ret;
+}
+
+static int /* FILE READ,   Buffer FILL data, Buffer Length */
+__FILE_GET_NEW_LINE(FILE *fr, char *buff, unsigned int bufflength)
+{
+    char *nl;
+    if(fgets(buff, bufflength, fr))
+    {
+        nl = strchr(buff, '\n');
+        if(!nl)
+        {
+            if(!feof(fr))
+            {   return ParseOverflow;
+            }
+        } /* remove new line char */
+        else
+        {   *nl = '\0';
+        }
+        return ParseSuccess;
+    }
+    else
+    {
+        if(ferror(fr))
+        {   return ParseError;
+        }
+        return ParseEOF;
+    }
+}
 
 static const char *const
 __SC_GET_FORMAT_FROM_TYPE(const enum SCType t)
@@ -93,33 +189,6 @@ __SC_GET_SIZE_FROM_TYPE(const enum SCType t)
     return 0;
 }
 
-static int /* FILE READ,   Buffer FILL data, Buffer Length */
-__FILE_GET_NEW_LINE(FILE *fr, char *buff, unsigned int bufflength)
-{
-    char *nl;
-    if(fgets(buff, bufflength, fr))
-    {
-        nl = strchr(buff, '\n');
-        if(!nl)
-        {
-            if(!feof(fr))
-            {   return ParseOverflow;
-            }
-        } /* remove new line char */
-        else
-        {   *nl = '\0';
-        }
-        return ParseSuccess;
-    }
-    else
-    {
-        if(ferror(fr))
-        {   return ParseError;
-        }
-        return ParseEOF;
-    }
-}
-
 SCItem *
 SCParserSearch(
         SCParser *parser,
@@ -131,7 +200,11 @@ SCParserSearch(
     }
     khint_t k = kh_get(__STR__TABLE__, parser->strtable, NAME);
     if(k != kh_end(parser->strtable))
-    {   return kh_val(parser->strtable, k);
+    {   
+        uint32_t index = kh_val(parser->strtable, k);
+        if(parser->index > index && index >= 0)
+        {   return parser->items + index;
+        }
     }
     return NULL;
 }
@@ -150,7 +223,7 @@ SCParserSearchSlow(
     for(i = 0; i < parser->index; ++i)
     {
         item = parser->items + i;
-        if(item->name == NAME)
+        if(!strcmp(item->name, NAME))
         {   return item;
         }
     }
@@ -167,7 +240,7 @@ SCParserLoad(
 {
     const int FAILURE = 1;
     const int SUCCESS = 0;
-    if(!item || !_return)
+    if(!item || !item->typename || !_return)
     {   return FAILURE;
     }
 
@@ -187,12 +260,12 @@ SCParserLoad(
     /* else we got a type */
     if(_optional_type == SCTypeSTRING)
     {
-        const uint32_t len = item->name_len;
+        const uint32_t len = item->type_len;
         const size_t size = len * sizeof(char);
         char *str = malloc(size);
         if(str)
         {   
-            memcpy(str, item->name, size);
+            memcpy(str, item->typename, size);
             memcpy(_return, &str, sizeof(char *));
             return SUCCESS;
         }
@@ -203,30 +276,34 @@ SCParserLoad(
     }
     /* clear memory */
     memset(data, 0, sizeof(uint8_t) * DATA_SIZE);
-    check = sscanf(item->name, format, &data);
+    check = sscanf(item->typename, format, &data);
     if(check == SSCANF_CHECKSUM)
     {   
-        memcpy(_return, data, bytescopy);
+        size_t copysize = bytescopy;
+        if(bytescopy > __SC_GET_SIZE_FROM_TYPE(item->type))
+        {   copysize = __SC_GET_SIZE_FROM_TYPE(item->type);
+        }
+        memcpy(_return, data, copysize);
         return SUCCESS;
     }
     return FAILURE;
 NOTYPE:
     /* check if negative */
-    negative = item->name[0] == '-';
+    negative = item->typename[0] == '-';
     /* if its negative skip the negative sign duh */
     i = negative;
-    for(; i < item->name_len - 1; ++i)
+    for(; i < item->type_len - 1; ++i)
     {
-        if(!isdigit(item->name[i]))
+        if(!isdigit(item->typename[i]))
         {   break;
         }
     }
     memset(data, 0, sizeof(uint8_t) * DATA_SIZE);
     if(negative)
-    {   check = sscanf(item->name, "%ld", (uint64_t *)&data);
+    {   check = sscanf(item->typename, "%ld", (uint64_t *)&data);
     }
     else
-    {   check = sscanf(item->name, "%lu", (uint64_t *)&data);
+    {   check = sscanf(item->typename, "%lu", (uint64_t *)&data);
     }
     if(check == SSCANF_CHECKSUM)
     {
@@ -305,24 +382,59 @@ SCParserReadFile(
     }
 
 
-
     FILE *fr = fopen(FILE_NAME, "r");
-
 
     if(!fr)
     {   return FAILURE;
     }
 
+    const int BUFF_LIMIT = 1024;
     int running = 1;
+    char buff[BUFF_LIMIT];
+    char *name = NULL;
+    char *typename = NULL;
 
+    SCItem *item;
     while(running)
     {
-        switch(__FILE_GET_NEW_LINE())
+        switch(__FILE_GET_NEW_LINE(fr, buff, BUFF_LIMIT))
+        {
+            case ParseSuccess: 
+                break;
+            case ParseEOF:
+                running = 0;
+                /* FALLTHROUGH */
+            case ParseOverflow: 
+            case ParseError: 
+            default:
+                continue;
+        }
+        name = __SC_PARSE_NAME(buff);
+        typename = __SC_PARSE_VALUE_STR(NULL);
+        if(!name || !typename)
+        {   
+            free(name);
+            free(typename);
+            continue;
+        }
+
+        item = SCParserSearch(parser, name);
+        if(!item)
+        {   item = SCParserSearchSlow(parser, name);
+        }
+        if(item)
+        {   
+            if(item->typename)
+            {   free(item->typename);
+            }
+            item->typename = typename;
+            item->type_len = strlen(typename);
+        }
+        else
+        {   free(typename);
+        }
+        free(name);
     }
-
-
-
-
 
     fclose(fr);
 }
@@ -400,6 +512,8 @@ SCParserNewVar(
     }
     item->name_len = VAR_NAME_FULL_LENGTH;
     item->data = malloc(item->size);
+    item->typename = NULL;
+    item->type_len = 0;
 
     /* update index */
     ++parser->index;
@@ -430,7 +544,7 @@ SCParserNewVar(
         default:
             /* bounds check */
             if(kh_end(parser->strtable) > k)
-            {   kh_value(parser->strtable, k) = NULL;
+            {   kh_value(parser->strtable, k) = parser->index;
             }
             break;
     }
@@ -453,11 +567,8 @@ SCParserDelVar(
         if(item->allocated)
         {   free(item->name);
         }
-        item->name = NULL;
-        item->allocated = 0;
-        item->type = 0;
-        item->name_len = 0;
-        item->size = 0;
+        free(item->typename);
+        memset(item, 0, sizeof(SCItem));
     }
     return !item;
 }
