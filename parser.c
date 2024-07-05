@@ -93,6 +93,33 @@ __SC_GET_SIZE_FROM_TYPE(const enum SCType t)
     return 0;
 }
 
+static int /* FILE READ,   Buffer FILL data, Buffer Length */
+__FILE_GET_NEW_LINE(FILE *fr, char *buff, unsigned int bufflength)
+{
+    char *nl;
+    if(fgets(buff, bufflength, fr))
+    {
+        nl = strchr(buff, '\n');
+        if(!nl)
+        {
+            if(!feof(fr))
+            {   return ParseOverflow;
+            }
+        } /* remove new line char */
+        else
+        {   *nl = '\0';
+        }
+        return ParseSuccess;
+    }
+    else
+    {
+        if(ferror(fr))
+        {   return ParseError;
+        }
+        return ParseEOF;
+    }
+}
+
 SCItem *
 SCParserSearch(
         SCParser *parser,
@@ -270,6 +297,34 @@ SCParserReadFile(
         const char *const FILE_NAME
         )
 {
+    const int FAILURE = 1;
+    const int SUCCESS = 0;
+
+    if(!parser)
+    {   return FAILURE;
+    }
+
+
+
+    FILE *fr = fopen(FILE_NAME, "r");
+
+
+    if(!fr)
+    {   return FAILURE;
+    }
+
+    int running = 1;
+
+    while(running)
+    {
+        switch(__FILE_GET_NEW_LINE())
+    }
+
+
+
+
+
+    fclose(fr);
 }
 
 int

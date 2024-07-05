@@ -21,6 +21,16 @@ enum SCType
     SCTypeSTRING,
 };
 
+enum SCParseCode
+{
+    ParseSuccess,
+    ParseError,
+    ParsePartialError,
+    ParseOverflow,
+    ParseEOF,
+};
+
+
 typedef struct _SP_PARSER_STRUT SCParser;
 typedef struct _SP_PARSER_ITEM SCItem;
 
@@ -85,6 +95,8 @@ SCParserDestroy(
         );
 
 /* Replaces variable data from parser if VAR_NAME found and applicable.
+ *
+ * NOTE: Only searches Previously created variables.
  *
  * NOTE: ANY PREVIOUS DATA in parser IS DESTROYED, if present.
  *
