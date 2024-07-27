@@ -71,7 +71,11 @@ __REMOVE_WHITE_SPACE(char *str, int str_len)
     }
     reti = 0;
     for(i = 0; i < len; ++i)
-    {   
+    {
+        /* comment */
+        if(str[i] == '#')   
+        {   break;
+        }
         if(str[i] != ' ')
         {   
             ret[reti] = str[i];
@@ -295,9 +299,7 @@ SCParserLoad(
     const int SSCANF_CHECKSUM = 1;
     const int DATA_SIZE = 32;
     uint8_t check;
-    uint8_t negative;
     uint8_t data[DATA_SIZE];
-    int32_t i;
 
     /* type handler */
     if(_optional_type == SCTypeNoType)
@@ -337,22 +339,8 @@ SCParserLoad(
 NOTYPE:
     /* TODO fix this later, dont use it though, prob when I use it again */
     /* check if negative */
-    negative = item->typename[0] == '-';
-    /* if its negative skip the negative sign duh */
-    i = negative;
-    for(; i < item->type_len - 1; ++i)
-    {
-        if(!isdigit(item->typename[i]))
-        {   break;
-        }
-    }
     memset(data, 0, sizeof(uint8_t) * DATA_SIZE);
-    if(negative)
-    {   check = sscanf(item->typename, "%ld", *(int64_t *)&data);
-    }
-    else
-    {   check = sscanf(item->typename, "%lu", *(uint64_t *)&data);
-    }
+    check = sscanf(item->typename, __SC_GET_FORMAT_FROM_SIZE(item->size), data);
     if(check == SSCANF_CHECKSUM)
     {
         memcpy(_return, data, bytescopy);
@@ -613,7 +601,6 @@ SCParserNewVar(
         }
     }
 
-    SCItem *items = parser->items;
     SCItem *item = parser->items + parser->index;
 
     if(_optional_type == SCTypeSTRING)
