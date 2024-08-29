@@ -9,7 +9,7 @@
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  *  The above copyright notice and this permission notice shall be included in all
  *  copies or substantial portions of the Software.
  *
@@ -35,7 +35,7 @@
 /* hashing */
 KHASH_MAP_INIT_STR(__STR__TABLE__, uint32_t)
 
-struct 
+struct
 _SP_PARSER_STRUT
 {
     SCItem *items;
@@ -57,77 +57,67 @@ _SP_PARSER_ITEM
     uint16_t size;
 };
 
-static char *
-__REMOVE_WHITE_SPACE(char *str, int str_len)
-{
-    char *ret = NULL;
-    int reti;
-    int i;
-    const int len = str_len;
-    int size = len + sizeof(char);
-    ret = malloc(size);
-    if(!ret)
-    {   return NULL;
-    }
-    reti = 0;
-    for(i = 0; i < len; ++i)
-    {
-        /* comment */
-        if(str[i] == '#')   
-        {   break;
-        }
-        if(str[i] != ' ')
-        {   
-            ret[reti] = str[i];
-            ++reti;
-        }
-    }
-    if(reti < size)
-    {   
-        size = reti + sizeof(char);
-        void *tmp = realloc(ret, size);
-        if(!tmp)
-        {   
-            free(ret);
-            return NULL;
-        }
-        ret = tmp;
-    }
-    ret[size - 1] = '\0';
-    return ret;
-}
-
-/* Allocated mememory must be freed by caller.
- * Can return NULL
+/*
+ * RETURN: EXIT_SUCCESS on Success.
+ * RETURN: EXIT_FAILURE on Failure.
  */
-static char *
-__SC_PARSE_NAME(char *buff)
+int
+__REMOVE__EXTRAS__STRING(
+    char *buff,
+    uint32_t buff_length,
+    uint32_t *len_return
+    )
 {
-    const char *delimeter = "=";
-    char *token = NULL;
-    char *ret = NULL;
-    const int maxlen = 1024;
-    
-    token = strtok(buff, delimeter);
-    if(token)
-    {   ret = __REMOVE_WHITE_SPACE(token, strnlen(token, maxlen));
+    if(!buff || !buff_length)
+    {   return EXIT_FAILURE;
+    }
+    int ret = EXIT_SUCCESS;
+    enum
+    {
+        WHITESPACE = ' ',
+        COMMENT = '#',
+        ENDLINE = '\0',
+    };
+    uint32_t i = 0;
+    uint32_t j = 0;
+    for(i = 0; i < buff_length; ++i)
+    {
+        switch(buff[i])
+        {
+            case ENDLINE:
+            case COMMENT:
+                goto RETURN;
+                break;
+            case WHITESPACE:
+                break;
+            default:
+                buff[j++] = buff[i];
+                break;
+        }
+    }
+    /* we reached the end of the buffer, so i - 1 to get a valid index.*/
+    --i;
+RETURN:
+    if(len_return)
+    {   *len_return = i;
     }
     return ret;
 }
 
-static char *
-__SC_PARSE_VALUE_STR(char *buff)
+static int
+__SC__PARSER__NAME(
+        char *str,
+        uint32_t *len_return
+        )
 {
-    const char *delimeter = "=";
-    char *token = NULL;
-    char *ret = NULL;
-    const int maxlen = 1024;
-    
-    token = strtok(buff, delimeter);
-    if(token)
-    {   ret = __REMOVE_WHITE_SPACE(token, strnlen(token, maxlen));
+    if(!str)
+    {   return EXIT_FAILURE;
     }
-    return ret;
+    const char *delimeter = "=";
+    if(len_return)
+    {   *len_return = strcspn(str, delimeter);
+    }
+    return EXIT_SUCCESS;
 }
 
 static int /* FILE READ,   Buffer FILL data, Buffer Length */
@@ -164,6 +154,8 @@ __SC_GET_FORMAT_FROM_TYPE(const enum SCType t)
     {
         case SCTypeNoType:
             return NULL;
+        case SCTypeBOOL:
+            return "%d";
         case SCTypeCHAR:
             return "%c";
         case SCTypeUCHAR:
@@ -190,7 +182,7 @@ __SC_GET_FORMAT_FROM_TYPE(const enum SCType t)
     return NULL;
 }
 
-static const char *const 
+static const char *const
 __SC_GET_FORMAT_FROM_SIZE(const size_t size)
 {
     switch(size)
@@ -214,6 +206,8 @@ __SC_GET_SIZE_FROM_TYPE(const enum SCType t)
     {
         case SCTypeNoType:
             return 0;
+        case SCTypeBOOL:
+            return sizeof(uint8_t);
         case SCTypeCHAR:
             return sizeof(int8_t);
         case SCTypeUCHAR:
@@ -246,12 +240,13 @@ SCParserSearch(
         const char *const NAME
         )
 {
-    if(!parser)
+    if(!parser || !NAME)
     {   return NULL;
     }
     khint_t k = kh_get(__STR__TABLE__, parser->strtable, NAME);
-    if(k != kh_end(parser->strtable))
-    {   
+    khint_t end = kh_end(parser->strtable);
+    if(k != end)
+    {
         uint32_t index = kh_val(parser->strtable, k);
         if(parser->index > index && index >= 0)
         {   return parser->items + index;
@@ -300,34 +295,26 @@ SCParserLoad(
     const int DATA_SIZE = 32;
     uint8_t check;
     uint8_t data[DATA_SIZE];
+    char *str;
 
+    /* clear memory */
+    memset(data, 0, sizeof(uint8_t) * DATA_SIZE);
     /* type handler */
     if(_optional_type == SCTypeNoType)
     {   goto NOTYPE;
     }
-
     /* else we got a type */
     if(_optional_type == SCTypeSTRING)
-    {
-        const uint32_t len = item->type_len;
-        const size_t size = len * sizeof(char);
-        char *str = malloc(size);
-        if(str)
-        {   
-            memcpy(str, item->typename, size);
-            memcpy(_return, &str, sizeof(char *));
-            return SUCCESS;
-        }
-        return FAILURE;
+    {   goto STRINGTYPE;
     }
     if(!format)
     {   goto NOTYPE;
     }
-    /* clear memory */
-    memset(data, 0, sizeof(uint8_t) * DATA_SIZE);
+    goto SINGLETYPE;
+SINGLETYPE:
     check = sscanf(item->typename, format, &data);
     if(check == SSCANF_CHECKSUM)
-    {   
+    {
         size_t copysize = bytescopy;
         if(bytescopy > __SC_GET_SIZE_FROM_TYPE(item->type))
         {   copysize = __SC_GET_SIZE_FROM_TYPE(item->type);
@@ -336,10 +323,16 @@ SCParserLoad(
         return SUCCESS;
     }
     return FAILURE;
+STRINGTYPE:
+    str = malloc(item->type_len);
+    if(str)
+    {
+        memcpy(str, item->typename, item->type_len);
+        memcpy(_return, &str, sizeof(char *));
+        return SUCCESS;
+    }
+    return FAILURE;
 NOTYPE:
-    /* TODO fix this later, dont use it though, prob when I use it again */
-    /* check if negative */
-    memset(data, 0, sizeof(uint8_t) * DATA_SIZE);
     check = sscanf(item->typename, __SC_GET_FORMAT_FROM_SIZE(item->size), data);
     if(check == SSCANF_CHECKSUM)
     {
@@ -349,6 +342,102 @@ NOTYPE:
     return FAILURE;
 }
 
+
+int
+SCParserWriteVarData(
+            FILE *fw,
+            char *data,
+            enum SCType type,
+            size_t size
+            )
+{
+    if(!fw || !data)
+    {   return EXIT_FAILURE;
+    }
+    const char *const format = __SC_GET_FORMAT_FROM_TYPE(type);
+
+    if(type)
+    {
+        switch(type)
+        {
+            case SCTypeBOOL:
+                fprintf(fw, format, *(uint8_t *)data);
+            case SCTypeCHAR:
+                fprintf(fw, format, *(int8_t *)data);
+                break;
+            case SCTypeUCHAR:
+                fprintf(fw, format, *(uint8_t *)data);
+                break;
+            case SCTypeSHORT:
+                fprintf(fw, format, *(int16_t *)data);
+                break;
+            case SCTypeUSHORT:
+                fprintf(fw, format, *(uint16_t *)data);
+                break;
+            case SCTypeINT:
+                fprintf(fw, format, *(int32_t *)data);
+                break;
+            case SCTypeUINT:
+                fprintf(fw, format, *(uint32_t *)data);
+                break;
+            case SCTypeFLOAT:
+                fprintf(fw, format, *(float *)data);
+                break;
+            case SCTypeDOUBLE:
+                fprintf(fw, format, *(double *)data);
+                break;
+            case SCTypeLONG:
+                fprintf(fw, format, *(int64_t *)data);
+                break;
+            case SCTypeULONG:
+                fprintf(fw, format, *(uint64_t *)data);
+                break;
+            case SCTypeSTRING:
+                fprintf(fw, format, (char *)data);
+                break;
+            case SCTypeNoType:
+                break;
+        }
+    }
+    else
+    {
+        switch(size)
+        {
+            case sizeof(int8_t):
+                fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(size), *(char *)data);
+                break;
+            case sizeof(int16_t):
+                fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(size), *(int16_t *)data);
+                break;
+            case sizeof(int32_t):
+                fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(size), *(float *)data);
+                break;
+            case sizeof(int64_t):
+                fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(size), *(int64_t *)data);
+                break;
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+int
+SCParserWriteVar(
+        FILE *fw,
+        SCItem *item
+        )
+{
+    if(!item->data || !item->name)
+    {   return EXIT_FAILURE;
+    }
+    const char *const name = item->name;
+    const enum SCType type = item->type;
+    const size_t size = item->size;
+
+    fprintf(fw, "%s = ", name);
+    SCParserWriteVarData(fw, item->data, type, size);
+    fprintf(fw, "\n");
+    return EXIT_SUCCESS;
+}
 
 int
 SCParserWrite(
@@ -374,77 +463,14 @@ SCParserWrite(
     for(i = 0; i < parser->index; ++i)
     {
         item = parser->items + i;
-        if(item->data && item->name)
-        {   
-            const char *const format = __SC_GET_FORMAT_FROM_TYPE(item->type);
-            fprintf(fw, "%s=", item->name);
-            if(format)
-            {   
-                switch(item->type)
-                {
-                    case SCTypeCHAR:
-                        fprintf(fw, format, *(int8_t *)item->data);
-                        break;
-                    case SCTypeUCHAR:
-                        fprintf(fw, format, *(uint8_t *)item->data);
-                        break;
-                    case SCTypeSHORT:
-                        fprintf(fw, format, *(int16_t *)item->data);
-                        break;
-                    case SCTypeUSHORT:
-                        fprintf(fw, format, *(uint16_t *)item->data);
-                        break;
-                    case SCTypeINT:
-                        fprintf(fw, format, *(int32_t *)item->data);
-                        break;
-                    case SCTypeUINT:
-                        fprintf(fw, format, *(uint32_t *)item->data);
-                        break;
-                    case SCTypeFLOAT:
-                        fprintf(fw, format, *(float *)item->data);
-                        break;
-                    case SCTypeDOUBLE:
-                        fprintf(fw, format, *(double *)item->data);
-                        break;
-                    case SCTypeLONG:
-                        fprintf(fw, format, *(int64_t *)item->data);
-                        break;
-                    case SCTypeULONG:
-                        fprintf(fw, format, *(uint64_t *)item->data);
-                        break;
-                    case SCTypeSTRING:
-                        fprintf(fw, format, (char *)item->data);
-                        break;
-                }
-            }
-            else
-            {   
-                switch(item->size)
-                {
-                    case sizeof(int8_t):
-                        fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(item->size), *(char *)item->data);
-                        break;
-                    case sizeof(int16_t):
-                        fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(item->size), *(int16_t *)item->data);
-                        break;
-                    case sizeof(int32_t):
-                        fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(item->size), *(float *)item->data);
-                        break;
-                    case sizeof(int64_t):
-                        fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(item->size), *(int64_t *)item->data);
-                        break;
-                }
-            }
-            fprintf(fw, "\n");
-        }
+        SCParserWriteVar(fw, item);
     }
     fclose(fw);
     return SUCCESS;
 }
 
-
-SCParser * 
-SCPParserCreate(
+SCParser *
+SCParserCreate(
         const uint32_t BASE_VAR_COUNT
         )
 {
@@ -454,7 +480,7 @@ SCPParserCreate(
         p->strtable = kh_init(__STR__TABLE__);
 
         if(!p->strtable)
-        {   
+        {
             free(p);
             return NULL;
         }
@@ -520,46 +546,61 @@ SCParserReadFile(
     char *name = NULL;
     char *typename = NULL;
 
+    int namestatus = 0;
+    uint32_t bufflenreal = 0;
+    uint32_t namelen = 0;
+    uint32_t typenamelen = 0;
     SCItem *item;
+    /* Make sure null byte is set */
+    buff[BUFF_LIMIT - 1] = '\0';
+    memset(buff, 0, BUFF_LIMIT);
     while(running)
     {
-        switch(__FILE_GET_NEW_LINE(fr, buff, BUFF_LIMIT))
+        switch(__FILE_GET_NEW_LINE(fr, buff, BUFF_LIMIT - 1))
         {
-            case ParseSuccess: 
+            case ParseSuccess:
                 break;
             case ParseEOF:
                 running = 0;
                 /* FALLTHROUGH */
-            case ParseOverflow: 
-            case ParseError: 
+            case ParseOverflow:
+            case ParseError:
             default:
                 continue;
         }
-        name = __SC_PARSE_NAME(buff);
-        typename = __SC_PARSE_VALUE_STR(NULL);
-        if(!name || !typename)
-        {   
-            free(name);
-            free(typename);
-            continue;
+        __REMOVE__EXTRAS__STRING(buff, BUFF_LIMIT - 1, &bufflenreal);
+        namestatus = __SC__PARSER__NAME(buff, &namelen);
+        if(namestatus != EXIT_SUCCESS)
+        {   continue;
         }
-
-        item = SCParserSearch(parser, name);
+        namestatus = __SC__PARSER__NAME(buff + namelen + 1, &typenamelen);
+        if(namestatus != EXIT_SUCCESS)
+        {   continue;
+        }
+        typename = malloc(typenamelen);
+        if(!typename)
+        {   continue;
+        }
+        memcpy(typename, buff + namelen + 1, typenamelen);
+        typename[typenamelen - 1] = '\0';
+        /* assuming its '=' */
+        buff[namelen] = '\0';
+        item = SCParserSearch(parser, buff);
         if(!item)
         {   item = SCParserSearchSlow(parser, name);
         }
         if(item)
-        {   
+        {
             if(item->typename)
             {   free(item->typename);
             }
             item->typename = typename;
-            item->type_len = strlen(typename);
+            item->type_len = typenamelen;
         }
         else
         {   free(typename);
         }
-        free(name);
+        memset(buff, 0, BUFF_LIMIT);
     }
 
     fclose(fr);
@@ -609,7 +650,7 @@ SCParserNewVar(
         item->type = SCTypeSTRING;
     }
     else if(__SC_GET_FORMAT_FROM_TYPE(_optional_type))
-    {   
+    {
         item->size = __SC_GET_SIZE_FROM_TYPE(_optional_type);
         item->type = _optional_type;
     }
@@ -685,7 +726,7 @@ SCParserDelVar(
     {   item = SCParserSearchSlow(parser, VAR_NAME);
     }
     if(item)
-    {   
+    {
         if(item->allocated)
         {   free(item->name);
         }
@@ -726,5 +767,3 @@ SCParserSaveVar(
     memcpy(item->data, data, item->size);
     return SUCCESS;
 }
-
-
