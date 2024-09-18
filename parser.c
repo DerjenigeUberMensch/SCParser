@@ -9,7 +9,7 @@
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- *
+ * 
  *  The above copyright notice and this permission notice shall be included in all
  *  copies or substantial portions of the Software.
  *
@@ -30,17 +30,16 @@
 #include "parser.h"
 
 
+#include "dynamic_array.h"
 #include "khash.h"
 
 /* hashing */
 KHASH_MAP_INIT_STR(__STR__TABLE__, uint32_t)
 
-struct
+struct 
 _SP_PARSER_STRUT
 {
-    SCItem *items;
-    uint32_t item_len;
-    uint32_t index;
+    GArray items;
     khash_t(__STR__TABLE__) *strtable;
 };
 
@@ -52,10 +51,27 @@ _SP_PARSER_ITEM
     void *data;
     uint32_t name_len;
     uint32_t type_len;
+    uint16_t size;
     uint8_t allocated;
     uint8_t type;
-    uint16_t size;
 };
+
+
+void
+__REMOVE__CHAR__FROM__STRING__(char *str, const char remove)
+{
+    if(!str || !remove)
+    {   return;
+    }
+    char *d = str;
+    do
+    {
+        while(*d == remove)
+        {   ++d;
+        }
+    } while((*str++ = *d++));
+}
+
 
 /*
  * RETURN: EXIT_SUCCESS on Success.
@@ -71,37 +87,32 @@ __REMOVE__EXTRAS__STRING(
     if(!buff || !buff_length)
     {   return EXIT_FAILURE;
     }
-    int ret = EXIT_SUCCESS;
     enum
     {
         WHITESPACE = ' ',
         COMMENT = '#',
-        ENDLINE = '\0',
     };
-    uint32_t i = 0;
-    uint32_t j = 0;
-    for(i = 0; i < buff_length; ++i)
+
+    uint32_t len = 0;
+
+    __REMOVE__CHAR__FROM__STRING__(buff, WHITESPACE);
+
+    /* set length if reached comment */
+    while(*buff++)
     {
-        switch(buff[i])
+        switch(*buff)
         {
-            case ENDLINE:
             case COMMENT:
                 goto RETURN;
-                break;
-            case WHITESPACE:
-                break;
-            default:
-                buff[j++] = buff[i];
-                break;
         }
+        ++len;
     }
-    /* we reached the end of the buffer, so i - 1 to get a valid index.*/
-    --i;
+
 RETURN:
     if(len_return)
-    {   *len_return = i;
+    {   *len_return = len;
     }
-    return ret;
+    return EXIT_SUCCESS;
 }
 
 static int
@@ -155,7 +166,7 @@ __SC_GET_FORMAT_FROM_TYPE(const enum SCType t)
         case SCTypeNoType:
             return NULL;
         case SCTypeBOOL:
-            return "%d";
+            return "%s";
         case SCTypeCHAR:
             return "%c";
         case SCTypeUCHAR:
@@ -233,6 +244,40 @@ __SC_GET_SIZE_FROM_TYPE(const enum SCType t)
     }
     return 0;
 }
+static uint32_t
+__SC__PARSER__SEARCH__INDEX__(
+        SCParser *parser,
+        const char *const NAME,
+        unsigned int *_NOT_FOUND
+        )
+{
+    uint32_t ret = 0;
+    if(!parser || !NAME)
+    {   
+        *_NOT_FOUND = 1;
+        return 0;
+    }
+    khint_t k = kh_get(__STR__TABLE__, parser->strtable, NAME);
+    khint_t end = kh_end(parser->strtable);
+    if(k != end)
+    {   return kh_val(parser->strtable, k);
+    }
+    else
+    {
+        const uint32_t LAST = GArrayEnd(&parser->items);
+        uint32_t i;
+        SCItem *item;
+        for(i = 0; i < LAST; ++i)
+        {
+            item = GArrayAt(&parser->items, i);
+            if(item && !strcmp(item->name, NAME))
+            {   return i;
+            }
+        }
+    }
+    *_NOT_FOUND = 1;
+    return ret;
+}
 
 SCItem *
 SCParserSearch(
@@ -240,19 +285,18 @@ SCParserSearch(
         const char *const NAME
         )
 {
+    void *ret = NULL;
     if(!parser || !NAME)
-    {   return NULL;
+    {   return ret;
     }
     khint_t k = kh_get(__STR__TABLE__, parser->strtable, NAME);
     khint_t end = kh_end(parser->strtable);
     if(k != end)
     {
         uint32_t index = kh_val(parser->strtable, k);
-        if(parser->index > index && index >= 0)
-        {   return parser->items + index;
-        }
+        ret = GArrayAt(&parser->items, index);
     }
-    return NULL;
+    return ret;
 }
 
 SCItem *
@@ -264,12 +308,13 @@ SCParserSearchSlow(
     if(!parser || !NAME)
     {   return NULL;
     }
+    const uint32_t LAST = GArrayEnd(&parser->items);
     uint32_t i;
     SCItem *item;
-    for(i = 0; i < parser->index; ++i)
+    for(i = 0; i < LAST; ++i)
     {
-        item = parser->items + i;
-        if(!strcmp(item->name, NAME))
+        item = GArrayAt(&parser->items, i);
+        if(item && !strcmp(item->name, NAME))
         {   return item;
         }
     }
@@ -290,6 +335,8 @@ SCParserLoad(
     {   return FAILURE;
     }
 
+    const char *const TRUE_STRING = "true";
+    const char *const FALSE_STRING = "false";
     const char *const format = __SC_GET_FORMAT_FROM_TYPE(_optional_type);
     const int SSCANF_CHECKSUM = 1;
     const int DATA_SIZE = 32;
@@ -307,10 +354,25 @@ SCParserLoad(
     if(_optional_type == SCTypeSTRING)
     {   goto STRINGTYPE;
     }
+    if(_optional_type == SCTypeBOOL)
+    {   goto BOOLTYPE;
+    }
     if(!format)
     {   goto NOTYPE;
     }
     goto SINGLETYPE;
+BOOLTYPE:
+    if(!strcmp(item->typename, TRUE_STRING))
+    {   
+        *(char *)_return = 1;
+        return SUCCESS;
+    }
+    if(!strcmp(item->typename, FALSE_STRING))
+    {   
+        memset(_return, 0, sizeof(uint8_t));
+        return SUCCESS;
+    }
+    /* FALLTHROUGH */
 SINGLETYPE:
     check = sscanf(item->typename, format, &data);
     if(check == SSCANF_CHECKSUM)
@@ -361,7 +423,8 @@ SCParserWriteVarData(
         switch(type)
         {
             case SCTypeBOOL:
-                fprintf(fw, format, *(uint8_t *)data);
+                fprintf(fw, format, *(uint8_t *)data ? "true" : "false");
+                break;
             case SCTypeCHAR:
                 fprintf(fw, format, *(int8_t *)data);
                 break;
@@ -457,13 +520,16 @@ SCParserWrite(
     {   return FAILURE;
     }
 
+    const uint32_t END = GArrayEnd(&parser->items);
     SCItem *item;
     uint32_t i;
 
-    for(i = 0; i < parser->index; ++i)
+    for(i = 0; i < END; ++i)
     {
-        item = parser->items + i;
-        SCParserWriteVar(fw, item);
+        item = GArrayAt(&parser->items, i);
+        if(item)
+        {   SCParserWriteVar(fw, item);
+        }
     }
     fclose(fw);
     return SUCCESS;
@@ -477,6 +543,7 @@ SCParserCreate(
     SCParser *p = malloc(sizeof(SCParser));
     if(p)
     {
+        int status;
         p->strtable = kh_init(__STR__TABLE__);
 
         if(!p->strtable)
@@ -484,15 +551,14 @@ SCParserCreate(
             free(p);
             return NULL;
         }
-        p->items = malloc(BASE_VAR_COUNT * sizeof(SCItem));
-        if(!p->items)
+        status = GArrayCreateFilled(&p->items, sizeof(SCItem), BASE_VAR_COUNT);
+        if(status == EXIT_FAILURE)
         {
             kh_destroy(__STR__TABLE__, p->strtable);
+            GArrayWipe(&p->items);
             free(p);
             return NULL;
         }
-        p->item_len = BASE_VAR_COUNT;
-        p->index = 0;
     }
     return p;
 }
@@ -502,11 +568,15 @@ SCParserDestroy(
         SCParser *parser
         )
 {
+    if(!parser)
+    {   return;
+    }
+    const uint32_t END = GArrayEnd(&parser->items);
     uint32_t i;
     SCItem *item;
-    for(i = 0; i < parser->index; ++i)
+    for(i = 0; i < END; ++i)
     {
-        item = parser->items + i;
+        item = GArrayAt(&parser->items, i);
         if(item->allocated)
         {   free(item->name);
         }
@@ -516,7 +586,7 @@ SCParserDestroy(
         free(item->data);
     }
     kh_destroy(__STR__TABLE__, parser->strtable);
-    free(parser->items);
+    GArrayWipe(&parser->items);
     free(parser);
 }
 
@@ -552,7 +622,6 @@ SCParserReadFile(
     uint32_t typenamelen = 0;
     SCItem *item;
     /* Make sure null byte is set */
-    buff[BUFF_LIMIT - 1] = '\0';
     memset(buff, 0, BUFF_LIMIT);
     while(running)
     {
@@ -577,12 +646,12 @@ SCParserReadFile(
         if(namestatus != EXIT_SUCCESS)
         {   continue;
         }
-        typename = malloc(typenamelen);
+        typename = malloc(typenamelen + 1);
         if(!typename)
         {   continue;
         }
         memcpy(typename, buff + namelen + 1, typenamelen);
-        typename[typenamelen - 1] = '\0';
+        typename[typenamelen] = '\0';
         /* assuming its '=' */
         buff[namelen] = '\0';
         item = SCParserSearch(parser, buff);
@@ -600,7 +669,7 @@ SCParserReadFile(
         else
         {   free(typename);
         }
-        memset(buff, 0, BUFF_LIMIT);
+        memset(buff, 0, bufflenreal);
     }
 
     fclose(fr);
@@ -626,38 +695,22 @@ SCParserNewVar(
     {   return FAILURE;
     }
 
-    /* increase array size if too small */
-    if(parser->index >= parser->item_len)
-    {
-        const float INCREASE_FACTOR = 1.5f;
-        const uint32_t newlen = parser->item_len * INCREASE_FACTOR;
-        void *rec = realloc(parser->items, (newlen) * sizeof(SCItem));
-        if(rec)
-        {
-            parser->items = rec;
-            parser->item_len = newlen;
-        }
-        else
-        {   return FAILURE;
-        }
-    }
-
-    SCItem *item = parser->items + parser->index;
+    SCItem item;
 
     if(_optional_type == SCTypeSTRING)
     {
-        item->size = sizeof(char *);
-        item->type = SCTypeSTRING;
+        item.size = sizeof(char *);
+        item.type = SCTypeSTRING;
     }
     else if(__SC_GET_FORMAT_FROM_TYPE(_optional_type))
     {
-        item->size = __SC_GET_SIZE_FROM_TYPE(_optional_type);
-        item->type = _optional_type;
+        item.size = __SC_GET_SIZE_FROM_TYPE(_optional_type);
+        item.type = _optional_type;
     }
     else if(size)
     {
-        item->size = size;
-        item->type = SCTypeNoType;
+        item.size = size;
+        item.type = SCTypeNoType;
     }
     else
     {   return FAILURE;
@@ -665,26 +718,36 @@ SCParserNewVar(
 
     if(READONLY_SECTION)
     {
-        item->name = VAR_NAME;
-        item->allocated = 0;
+        item.name = (char *)VAR_NAME;
+        item.allocated = 0;
     }
     else
     {
-        item->name = malloc(VAR_NAME_FULL_LENGTH * sizeof(char));
-        item->allocated = 1;
-        if(!item->name)
+        item.name = malloc(VAR_NAME_FULL_LENGTH * sizeof(char));
+        item.allocated = 1;
+        if(!item.name)
         {   return FAILURE;
         }
-        memcpy(item->name, VAR_NAME, VAR_NAME_FULL_LENGTH);
+        memcpy(item.name, VAR_NAME, VAR_NAME_FULL_LENGTH);
     }
-    item->name_len = VAR_NAME_FULL_LENGTH;
-    item->data = malloc(item->size);
-    item->typename = NULL;
-    item->type_len = 0;
+    item.name_len = VAR_NAME_FULL_LENGTH;
+    item.data = malloc(item.size);
+    item.typename = NULL;
+    item.type_len = 0;
+
+    int status = GArrayPushBack(&parser->items, &item);
+    if(status == EXIT_FAILURE)
+    {
+        free(item.data);
+        if(item.allocated)
+        {   free(item.name);
+        }
+        return EXIT_FAILURE;
+    }
 
     /* add to table */
     int err = 3;
-    khint_t k = kh_put(__STR__TABLE__, parser->strtable, item->name, &err);
+    khint_t k = kh_put(__STR__TABLE__, parser->strtable, item.name, &err);
     enum
     {
         __KHASH_BAD_OPERATION = -1,
@@ -707,11 +770,10 @@ SCParserNewVar(
         default:
             /* bounds check */
             if(kh_end(parser->strtable) > k)
-            {   kh_value(parser->strtable, k) = parser->index;
+            {   kh_value(parser->strtable, k) = GArrayEnd(&parser->items);
             }
             break;
     }
-    ++parser->index;
     return SUCCESS;
 }
 
@@ -721,19 +783,21 @@ SCParserDelVar(
         const char *const VAR_NAME
         )
 {
-    SCItem *item = SCParserSearch(parser, VAR_NAME);
-    if(!item)
-    {   item = SCParserSearchSlow(parser, VAR_NAME);
-    }
-    if(item)
+    unsigned int NOT_FOUND = 0;
+    uint32_t index =  __SC__PARSER__SEARCH__INDEX__(parser, VAR_NAME, &NOT_FOUND);
+    if(!NOT_FOUND)
     {
-        if(item->allocated)
-        {   free(item->name);
+        SCItem *item = GArrayAt(&parser->items, index);
+        if(item)
+        {
+            if(item->allocated)
+            {   free(item->name);
+            }
+            free(item->typename);
+            return GArrayDelete(&parser->items, index);
         }
-        free(item->typename);
-        memset(item, 0, sizeof(SCItem));
     }
-    return !item;
+    return EXIT_FAILURE;
 }
 
 int
