@@ -583,6 +583,55 @@ SCParserDestroy(
     free(parser);
 }
 
+SCItem *
+SCParserReadLine(
+    SCParser *parser,
+    char *buff,
+    uint32_t buff_length,
+    char **data_fill
+    )
+{
+    uint32_t namelen;
+    uint8_t namestatus;
+    uint32_t typenamelen;
+    __REMOVE__EXTRAS__STRING(buff, buff_length - 1, &buff_length);
+    namestatus = __SC__PARSER__NAME(buff, &namelen);
+    if(namestatus != EXIT_SUCCESS)
+    {   return NULL;
+    }
+    
+    const char saved_char = buff[namelen];
+
+    buff[namelen] = '\0';
+
+    SCItem *item;
+    /* search for item. */
+    item = SCParserSearch(parser, buff);
+    if(!item)
+    {   item = SCParserSearchSlow(parser, buff);
+    }
+    buff[namelen] = saved_char;
+
+    if(item && data_fill)
+    {
+        namestatus = __SC__PARSER__NAME(buff + namelen + 1, &typenamelen);
+        if(namestatus == EXIT_SUCCESS)
+        {        
+            char *data = malloc(typenamelen + 1);
+            if(data)
+            {   
+                /* copy buff to data */
+                memcpy(data, buff + namelen + 1, typenamelen);
+                /* set string null byte */
+                data[typenamelen] = '\0';
+                /* fill data_fill with data pointer */
+                memcpy(data_fill, &data, sizeof(void *));
+            }
+        }
+    }
+    return item;
+}
+
 int
 SCParserReadFile(
         SCParser *parser,
@@ -606,12 +655,9 @@ SCParserReadFile(
     const int BUFF_LIMIT = 1024;
     int running = 1;
     char buff[BUFF_LIMIT];
-    char *name = NULL;
     char *typename = NULL;
 
-    int namestatus = 0;
     uint32_t bufflenreal = 0;
-    uint32_t namelen = 0;
     uint32_t typenamelen = 0;
     SCItem *item;
     /* Make sure null byte is set */
@@ -620,37 +666,17 @@ SCParserReadFile(
     {
         switch(__FILE_GET_NEW_LINE(fr, buff, BUFF_LIMIT - 1))
         {
+            case ParseOverflow:
             case ParseSuccess:
                 break;
             case ParseEOF:
                 running = 0;
                 /* FALLTHROUGH */
-            case ParseOverflow:
             case ParseError:
             default:
                 continue;
         }
-        __REMOVE__EXTRAS__STRING(buff, BUFF_LIMIT - 1, &bufflenreal);
-        namestatus = __SC__PARSER__NAME(buff, &namelen);
-        if(namestatus != EXIT_SUCCESS)
-        {   continue;
-        }
-        namestatus = __SC__PARSER__NAME(buff + namelen + 1, &typenamelen);
-        if(namestatus != EXIT_SUCCESS)
-        {   continue;
-        }
-        typename = malloc(typenamelen + 1);
-        if(!typename)
-        {   continue;
-        }
-        memcpy(typename, buff + namelen + 1, typenamelen);
-        typename[typenamelen] = '\0';
-        /* assuming its '=' */
-        buff[namelen] = '\0';
-        item = SCParserSearch(parser, buff);
-        if(!item)
-        {   item = SCParserSearchSlow(parser, name);
-        }
+        item = SCParserReadLine(parser, buff, BUFF_LIMIT, &typename);
         if(item)
         {
             if(item->typename)
@@ -662,6 +688,8 @@ SCParserReadFile(
         else
         {   free(typename);
         }
+
+        typename = NULL;
         memset(buff, 0, bufflenreal);
     }
 
