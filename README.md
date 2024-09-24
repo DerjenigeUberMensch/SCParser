@@ -90,3 +90,12 @@ main(void)
     SCParserDestroy(parser);
     return 0;
 }
+
+```
+## Untested,
+These are things that should work, but are untested.
+- No type variables
+- READ_ONLY = 0, strings
+These are things that probably dont work
+- Stack allocated strings (non const/static), with READ_ONLY = 1
+- Saving/Creating Strings
