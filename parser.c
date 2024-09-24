@@ -40,6 +40,7 @@ struct
 _SP_PARSER_STRUT
 {
     GArray items;
+    uint32_t items_len;
     khash_t(__STR__TABLE__) *strtable;
 };
 
@@ -54,6 +55,11 @@ _SP_PARSER_ITEM
     uint16_t size;
     uint8_t allocated;
     uint8_t type;
+};
+
+enum
+{
+    SC_PARSER_FORMAT_BUFF_FILL_SIZE = 4,
 };
 
 
@@ -158,56 +164,45 @@ __FILE_GET_NEW_LINE(FILE *fr, char *buff, unsigned int bufflength)
     }
 }
 
-static const char *const
-__SC_GET_FORMAT_FROM_TYPE(const enum SCType t)
+static int 
+__SC_GET_FORMAT_FROM_TYPE_FILL(const enum SCType t, char fill_buff[SC_PARSER_FORMAT_BUFF_FILL_SIZE])
 {
+
+    int i = 0;
+
+    fill_buff[i++] = '%';
     switch(t)
     {
-        case SCTypeNoType:
-            return NULL;
-        case SCTypeBOOL:
-            return "%s";
-        case SCTypeCHAR:
-            return "%c";
-        case SCTypeUCHAR:
-            return "%d";
-        case SCTypeSHORT:
-            return "%d";
-        case SCTypeUSHORT:
-            return "%d";
-        case SCTypeINT:
-            return "%d";
-        case SCTypeUINT:
-            return "%u";
-        case SCTypeFLOAT:
-            return "%f";
-        case SCTypeDOUBLE:
-            return "%lf";
-        case SCTypeLONG:
-            return "%ld";
-        case SCTypeULONG:
-            return "%lu";
-        case SCTypeSTRING:
-            return "%s";
+        case SCTypeNoType:  return EXIT_FAILURE;
+        case SCTypeBOOL:    fill_buff[i++] = 's';   break;
+        case SCTypeCHAR:    fill_buff[i++] = 'c';   break;
+        case SCTypeUCHAR:   fill_buff[i++] = 'd';   break;
+        case SCTypeSHORT:   fill_buff[i++] = 'd';   break;
+        case SCTypeUSHORT:  fill_buff[i++] = 'd';   break;
+        case SCTypeINT:     fill_buff[i++] = 'd';   break;
+        case SCTypeUINT:    fill_buff[i++] = 'u';   break;
+        case SCTypeFLOAT:   fill_buff[i++] = 'f';   break;
+        case SCTypeDOUBLE:  fill_buff[i++] = 'l'; 
+                            fill_buff[i++] = 'f';   break;
+        case SCTypeLONG:    fill_buff[i++] = 'l'; 
+                            fill_buff[i++] = 'd';   break;
+        case SCTypeULONG:   fill_buff[i++] = 'l'; 
+                            fill_buff[i++] = 'u';   break;
+        case SCTypeSTRING:  fill_buff[i++] = 's';   break;
     }
-    return NULL;
+    return EXIT_SUCCESS;
 }
-
-static const char *const
-__SC_GET_FORMAT_FROM_SIZE(const size_t size)
+static int
+__SC_GET_FORMAT_FROM_SIZE_FILL(const size_t size, char fill_buff[SC_PARSER_FORMAT_BUFF_FILL_SIZE])
 {
     switch(size)
     {
-        case sizeof(int8_t):
-            return "%c";
-        case sizeof(int16_t):
-            return "%d";
-        case sizeof(int32_t):
-            return "%f";
-        case sizeof(int64_t):
-            return "%ld";
+        default:
+        case sizeof(uint8_t):    return __SC_GET_FORMAT_FROM_TYPE_FILL(SCTypeCHAR, fill_buff);
+        case sizeof(uint16_t):   return __SC_GET_FORMAT_FROM_TYPE_FILL(SCTypeINT, fill_buff);
+        case sizeof(uint32_t):   return __SC_GET_FORMAT_FROM_TYPE_FILL(SCTypeFLOAT, fill_buff);
+        case sizeof(uint64_t):   return __SC_GET_FORMAT_FROM_TYPE_FILL(SCTypeLONG, fill_buff);
     }
-    return "%c";
 }
 
 static const unsigned int
@@ -215,35 +210,23 @@ __SC_GET_SIZE_FROM_TYPE(const enum SCType t)
 {
     switch(t)
     {
-        case SCTypeNoType:
-            return 0;
-        case SCTypeBOOL:
-            return sizeof(uint8_t);
-        case SCTypeCHAR:
-            return sizeof(int8_t);
-        case SCTypeUCHAR:
-            return sizeof(uint8_t);
-        case SCTypeSHORT:
-            return sizeof(int16_t);
-        case SCTypeUSHORT:
-            return sizeof(uint16_t);
-        case SCTypeINT:
-            return sizeof(int32_t);
-        case SCTypeUINT:
-            return sizeof(uint32_t);
-        case SCTypeFLOAT:
-            return sizeof(float);
-        case SCTypeDOUBLE:
-            return sizeof(double);
-        case SCTypeLONG:
-            return sizeof(int64_t);
-        case SCTypeULONG:
-            return sizeof(uint64_t);
-        case SCTypeSTRING:
-            return 0;
+        default:            return 0;
+        case SCTypeSTRING:  return 0;
+        case SCTypeNoType:  return 0;
+        case SCTypeBOOL:    return sizeof(uint8_t);
+        case SCTypeCHAR:    return sizeof(int8_t);
+        case SCTypeUCHAR:   return sizeof(uint8_t);
+        case SCTypeSHORT:   return sizeof(int16_t);
+        case SCTypeUSHORT:  return sizeof(uint16_t);
+        case SCTypeINT:     return sizeof(int32_t);
+        case SCTypeUINT:    return sizeof(uint32_t);
+        case SCTypeFLOAT:   return sizeof(float);
+        case SCTypeDOUBLE:  return sizeof(double);
+        case SCTypeLONG:    return sizeof(int64_t);
+        case SCTypeULONG:   return sizeof(uint64_t);
     }
-    return 0;
 }
+
 static uint32_t
 __SC__PARSER__SEARCH__INDEX__(
         SCParser *parser,
@@ -337,11 +320,11 @@ SCParserLoad(
 
     const char *const TRUE_STRING = "true";
     const char *const FALSE_STRING = "false";
-    const char *const format = __SC_GET_FORMAT_FROM_TYPE(_optional_type);
     const int SSCANF_CHECKSUM = 1;
     const int DATA_SIZE = 32;
     uint8_t check;
     uint8_t data[DATA_SIZE];
+    char format[SC_PARSER_FORMAT_BUFF_FILL_SIZE];
     char *str;
 
     /* clear memory */
@@ -357,7 +340,8 @@ SCParserLoad(
     if(_optional_type == SCTypeBOOL)
     {   goto BOOLTYPE;
     }
-    if(!format)
+    check = __SC_GET_FORMAT_FROM_TYPE_FILL(_optional_type, format);
+    if(check == EXIT_FAILURE)
     {   goto NOTYPE;
     }
     goto SINGLETYPE;
@@ -395,7 +379,13 @@ STRINGTYPE:
     }
     return FAILURE;
 NOTYPE:
-    check = sscanf(item->typename, __SC_GET_FORMAT_FROM_SIZE(item->size), data);
+    check = __SC_GET_FORMAT_FROM_SIZE_FILL(item->size, (char *)format);
+    if(check == EXIT_SUCCESS)
+    {   check = sscanf(item->typename, format, data);
+    }
+    else
+    {   check = !SSCANF_CHECKSUM;
+    }
     if(check == SSCANF_CHECKSUM)
     {
         memcpy(_return, data, bytescopy);
@@ -416,10 +406,11 @@ SCParserWriteVarData(
     if(!fw || !data)
     {   return EXIT_FAILURE;
     }
-    const char *const format = __SC_GET_FORMAT_FROM_TYPE(type);
+    char format[SC_PARSER_FORMAT_BUFF_FILL_SIZE];
 
     if(type)
     {
+        __SC_GET_FORMAT_FROM_TYPE_FILL(type, format);
         switch(type)
         {
             case SCTypeBOOL:
@@ -464,19 +455,20 @@ SCParserWriteVarData(
     }
     else
     {
+        __SC_GET_FORMAT_FROM_SIZE_FILL(size, format);
         switch(size)
         {
             case sizeof(int8_t):
-                fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(size), *(char *)data);
+                fprintf(fw, format, *(char *)data);
                 break;
             case sizeof(int16_t):
-                fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(size), *(int16_t *)data);
+                fprintf(fw, format, *(int16_t *)data);
                 break;
             case sizeof(int32_t):
-                fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(size), *(float *)data);
+                fprintf(fw, format, *(float *)data);
                 break;
             case sizeof(int64_t):
-                fprintf(fw, __SC_GET_FORMAT_FROM_SIZE(size), *(int64_t *)data);
+                fprintf(fw, format, *(int64_t *)data);
                 break;
         }
     }
@@ -545,6 +537,7 @@ SCParserCreate(
     {
         int status;
         p->strtable = kh_init(__STR__TABLE__);
+        p->items_len = 0;
 
         if(!p->strtable)
         {
@@ -688,10 +681,14 @@ SCParserNewVar(
 {
     const int FAILURE = 1;
     const int SUCCESS = 0;
+    char format[SC_PARSER_FORMAT_BUFF_FILL_SIZE];
+    int format_status = EXIT_FAILURE;
+
     if(!parser || !VAR_NAME)
     {   return FAILURE;
     }
-    if(!size && !__SC_GET_FORMAT_FROM_TYPE(_optional_type))
+    format_status = __SC_GET_FORMAT_FROM_TYPE_FILL(_optional_type, format);
+    if(!size && format_status == EXIT_FAILURE)
     {   return FAILURE;
     }
 
@@ -702,7 +699,7 @@ SCParserNewVar(
         item.size = sizeof(char *);
         item.type = SCTypeSTRING;
     }
-    else if(__SC_GET_FORMAT_FROM_TYPE(_optional_type))
+    else if(format_status == EXIT_SUCCESS)
     {
         item.size = __SC_GET_SIZE_FROM_TYPE(_optional_type);
         item.type = _optional_type;
@@ -735,7 +732,13 @@ SCParserNewVar(
     item.typename = NULL;
     item.type_len = 0;
 
-    int status = GArrayPushBack(&parser->items, &item);
+    int status;
+    if(GArrayEnd(&parser->items) <= parser->items_len)
+    {   status = GArrayPushBack(&parser->items, &item);
+    }
+    else
+    {   status = GArrayReplace(&parser->items, &item, parser->items_len);
+    }
     if(status == EXIT_FAILURE)
     {
         free(item.data);
@@ -770,10 +773,11 @@ SCParserNewVar(
         default:
             /* bounds check */
             if(kh_end(parser->strtable) > k)
-            {   kh_value(parser->strtable, k) = GArrayEnd(&parser->items);
+            {   kh_value(parser->strtable, k) = parser->items_len;
             }
             break;
     }
+    ++parser->items_len;
     return SUCCESS;
 }
 
@@ -794,6 +798,7 @@ SCParserDelVar(
             {   free(item->name);
             }
             free(item->typename);
+            --parser->items_len;
             return GArrayDelete(&parser->items, index);
         }
     }

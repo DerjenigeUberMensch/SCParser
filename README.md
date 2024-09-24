@@ -9,13 +9,13 @@ A revised version of [ConfigParser](https://github.com/DerjenigeUberMensch/Confi
 #include "parser.h"
 
 int
-main()
+main(void)
 {
     const char *const VAR_NAME = "VAR_INT";
     int var_int = 10;
     const int VAR_NUM_SHOWCASE = 1;
 
-    SCParser *parser = SCPParserCreate(VAR_NUM_SHOWCASE);
+    SCParser *parser = SCParserCreate(VAR_NUM_SHOWCASE);
     /* Failed to aloc memory for parser */
     if(!parser)
     {     return 1;
@@ -90,16 +90,3 @@ main()
     SCParserDestroy(parser);
     return 0;
 }
-
-```
-
-## Untested,
-These are things that should work, but are untested.
-- No type variables
-- READ_ONLY = 0, strings
-
-These are things that probably dont work
-- Stack allocated strings (non const/static), with READ_ONLY = 1
-- Saving/Creating Strings
-
-
